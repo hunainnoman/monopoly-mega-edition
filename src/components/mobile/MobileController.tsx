@@ -113,11 +113,26 @@ export function MobileController({ player, gameState, onSendMessage }: MobileCon
                 </div>
                 <h3 className="text-base font-bold text-white">In Pre-Game Lobby</h3>
                 <p className="text-xs text-slate-400">
-                  Waiting for host to start the game on the laptop screen.
+                  {gameState.players.length} player{gameState.players.length === 1 ? '' : 's'} connected.
                 </p>
                 <div className="text-xs text-emerald-400 font-mono font-bold">
                   Starting Bankroll: $2,500
                 </div>
+
+                {/* Allow Player 1 to start game directly from phone */}
+                {gameState.players[0]?.id === currentPlayer.id ? (
+                  <button
+                    onClick={() => handleTap(() => onSendMessage({ type: 'START_GAME' }))}
+                    className="w-full py-3.5 mt-2 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-500 hover:from-emerald-500 hover:to-teal-400 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 active:scale-95"
+                  >
+                    <Play className="w-4 h-4 fill-white" />
+                    <span>Start Mega Game Now</span>
+                  </button>
+                ) : (
+                  <p className="text-[11px] text-slate-500 italic pt-1">
+                    Waiting for room leader ({gameState.players[0]?.name || 'Player 1'}) or host screen to start the game...
+                  </p>
+                )}
               </div>
             )}
 
