@@ -53,20 +53,32 @@ export class HostGameManager {
   }
 
   handlePlayerJoin(playerData: Omit<Player, 'position' | 'inJail' | 'jailTurns' | 'getOutOfJailCards' | 'busTickets' | 'isBankrupt' | 'isConnected'>): { success: boolean; error?: string } {
+    // 1. Check if player is already in room (by ID or matching name)
+    const existingById = this.state.players.find((p) => p.id === playerData.id);
+    const existingByName = this.state.players.find(
+      (p) => p.name.trim().toLowerCase() === playerData.name.trim().toLowerCase()
+    );
+    const existing = existingById || existingByName;
+
+    if (existing) {
+      existing.id = playerData.id;
+      existing.name = playerData.name;
+      existing.color = playerData.color;
+      existing.tokenIcon = playerData.tokenIcon;
+      existing.isConnected = true;
+      this.addLog(`${existing.name} connected.`, 'info');
+      this.updateState(() => {});
+      return { success: true };
+    }
+
+    // 2. Reject new players if game is already playing
     if (this.state.status !== 'LOBBY') {
-      // Check if this is a reconnecting player
-      const existing = this.state.players.find((p) => p.id === playerData.id);
-      if (existing) {
-        existing.isConnected = true;
-        this.addLog(`${existing.name} reconnected.`, 'info');
-        this.updateState(() => {});
-        return { success: true };
-      }
       return { success: false, error: 'Game already in progress.' };
     }
 
-    if (this.state.players.length >= 4) {
-      return { success: false, error: 'Room is full (max 4 players).' };
+    // 3. Mega Edition supports up to 8 players
+    if (this.state.players.length >= 8) {
+      return { success: false, error: 'Room is full (max 8 players).' };
     }
 
     const newPlayer: Player = {

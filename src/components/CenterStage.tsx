@@ -131,7 +131,7 @@ export function CenterStage({ gameState, originUrl, onStartGame }: CenterStagePr
           {/* Connected Players in Lobby */}
           <div className="mt-5 w-full max-w-lg">
             <div className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2 flex items-center justify-between">
-              <span>Connected Players ({gameState.players.length}/4)</span>
+              <span>Connected Players ({gameState.players.length})</span>
               {gameState.players.length >= 1 && onStartGame && (
                 <button
                   onClick={onStartGame}
@@ -157,7 +157,7 @@ export function CenterStage({ gameState, originUrl, onStartGame }: CenterStagePr
                   </div>
                 </div>
               ))}
-              {Array.from({ length: 4 - gameState.players.length }).map((_, i) => (
+              {Array.from({ length: Math.max(0, 4 - gameState.players.length) }).map((_, i) => (
                 <div key={i} className="flex items-center justify-center p-2 rounded-xl border-2 border-dashed border-[#b89758]/40 text-slate-400 text-xs font-mono">
                   Waiting for player {gameState.players.length + i + 1}...
                 </div>

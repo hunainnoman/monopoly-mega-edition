@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getGame, getOrCreateGame } from '../../../lib/serverGameStore';
+import { fetchLatestState, publishAction } from '../../../lib/realtimeSync';
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -7,6 +8,12 @@ export async function GET(req: Request) {
 
   if (!roomCode) {
     return NextResponse.json({ error: 'Missing roomCode' }, { status: 400 });
+  }
+
+  // Check authoritative broadcast state first to unify multi-instance Vercel serverless
+  const latestState = await fetchLatestState(roomCode);
+  if (latestState) {
+    return NextResponse.json({ state: latestState });
   }
 
   const manager = getGame(roomCode);
@@ -20,13 +27,18 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { action, roomCode, playerId, ...payload } = body;
+    const { action, roomCode, playerId, actionId, ...payload } = body;
 
     if (!roomCode) {
       return NextResponse.json({ error: 'Missing roomCode' }, { status: 400 });
     }
 
     const cleanCode = roomCode.toUpperCase().trim();
+    const effectiveActionId = actionId || `act-api-${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
+
+    // Broadcast action to authoritative host with deduplication ID
+    publishAction(cleanCode, { actionId: effectiveActionId, action, roomCode: cleanCode, playerId, ...payload }).catch(() => {});
+
     const manager = getOrCreateGame(cleanCode);
 
     if (action === 'CREATE_ROOM') {

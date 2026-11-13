@@ -5,6 +5,11 @@ import { useSearchParams } from 'next/navigation';
 import { GameState, PeerMessage, Player } from '../../types/game';
 import { MobileLobbyJoin } from '../../components/mobile/MobileLobbyJoin';
 import { MobileController } from '../../components/mobile/MobileController';
+import { 
+  publishAction, 
+  subscribeToState, 
+  fetchLatestState 
+} from '../../lib/realtimeSync';
 import { Loader2 } from 'lucide-react';
 
 function PlayContent() {
@@ -20,26 +25,47 @@ function PlayContent() {
   const activeRoomCodeRef = useRef<string>('');
   activeRoomCodeRef.current = roomCode;
 
-  // Polling loop to stay synchronized in real-time
+  // Restore saved player from session storage if page reloaded
   useEffect(() => {
-    if (!player || !roomCode) return;
-
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/game?roomCode=${encodeURIComponent(activeRoomCodeRef.current)}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.state) {
-            setGameState(data.state);
-          }
+    if (!roomCode) return;
+    try {
+      const saved = sessionStorage.getItem(`monopoly_player_${roomCode}`);
+      if (saved) {
+        const p = JSON.parse(saved);
+        if (p && p.id) {
+          setPlayer(p);
+          publishAction(roomCode, {
+            actionId: `act-rejoin-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+            action: 'JOIN_LOBBY',
+            roomCode,
+            playerId: p.id,
+            player: p,
+          });
         }
-      } catch (e) {
-        // Silently retry on next poll interval
       }
-    }, 600);
+    } catch (e) {}
+  }, [roomCode]);
 
-    return () => clearInterval(interval);
-  }, [player, roomCode]);
+  // Real-time synchronization subscription to authoritative host state
+  useEffect(() => {
+    if (!roomCode) return;
+
+    // Fetch initial state immediately
+    fetchLatestState(roomCode).then((state) => {
+      if (state) setGameState(state);
+    });
+
+    // Subscribe to continuous state stream from host
+    const unsubscribe = subscribeToState(roomCode, (newState) => {
+      if (newState && newState.roomCode === activeRoomCodeRef.current) {
+        setGameState(newState);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [roomCode]);
 
   const handleJoin = async (targetRoomCode: string, name: string, color: string, tokenIcon: string) => {
     try {
@@ -49,7 +75,20 @@ function PlayContent() {
       const cleanCode = targetRoomCode.toUpperCase().trim();
       setRoomCode(cleanCode);
 
-      const playerId = `player-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      // Re-use existing player ID for this session if available
+      let playerId = '';
+      try {
+        const savedPid = sessionStorage.getItem(`monopoly_pid_${cleanCode}`);
+        if (savedPid) playerId = savedPid;
+      } catch (e) {}
+
+      if (!playerId) {
+        playerId = `player-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        try {
+          sessionStorage.setItem(`monopoly_pid_${cleanCode}`, playerId);
+        } catch (e) {}
+      }
+
       const newPlayer: Player = {
         id: playerId,
         name,
@@ -65,26 +104,39 @@ function PlayContent() {
         isConnected: true,
       };
 
-      const res = await fetch('/api/game', {
+      try {
+        sessionStorage.setItem(`monopoly_player_${cleanCode}`, JSON.stringify(newPlayer));
+      } catch (e) {}
+
+      const actionId = `act-join-${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
+
+      // 1. Direct real-time action publish to Authoritative Host
+      const joinPayload = {
+        actionId,
+        action: 'JOIN_LOBBY',
+        roomCode: cleanCode,
+        playerId,
+        player: newPlayer,
+      };
+
+      await publishAction(cleanCode, joinPayload);
+
+      // 2. Also send to API endpoint as dual-dispatch fallback
+      fetch('/api/game', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'JOIN_LOBBY',
-          roomCode: cleanCode,
-          player: newPlayer,
-        }),
-      });
+        body: JSON.stringify(joinPayload),
+      }).catch(() => {});
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        setErrorMessage(data.error || 'Failed to join room. Verify the room code on your laptop.');
-        setIsLoading(false);
-        return;
-      }
-
-      setGameState(data.state);
       setPlayer(newPlayer);
       setIsLoading(false);
+
+      // Request immediate sync from host
+      publishAction(cleanCode, { 
+        actionId: `act-sync-${Date.now()}`,
+        action: 'REQUEST_SYNC', 
+        roomCode: cleanCode 
+      });
     } catch (err: any) {
       console.error('Failed to join:', err);
       setErrorMessage(err?.message || 'Could not connect to host. Make sure host board is open.');
@@ -96,27 +148,25 @@ function PlayContent() {
     if (!player || !roomCode) return;
 
     try {
-      // Map PeerMessage to API Action payload
       const { type, ...restMsg } = msg as any;
+      const actionId = `act-${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
       const payload: any = {
+        actionId,
         action: type,
         roomCode,
         playerId: player.id,
         ...restMsg,
       };
 
-      const res = await fetch('/api/game', {
+      // 1. Publish action to host via realtime pub-sub
+      await publishAction(roomCode, payload);
+
+      // 2. Also dual-dispatch to API endpoint
+      fetch('/api/game', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.state) {
-          setGameState(data.state);
-        }
-      }
+      }).catch(() => {});
     } catch (err) {
       console.error('Error sending action:', err);
     }
@@ -133,9 +183,12 @@ function PlayContent() {
     );
   }
 
+  // Find updated player state from gameState
+  const currentSyncedPlayer = gameState.players.find((p) => p.id === player.id) || player;
+
   return (
     <MobileController
-      player={player}
+      player={currentSyncedPlayer}
       gameState={gameState}
       onSendMessage={handleSendMessage}
     />
