@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Lock, Eye, EyeOff, ShieldAlert, Sparkles, CheckCircle2, ArrowRight } from 'lucide-react';
+import { Lock, Eye, EyeOff, ShieldAlert, CheckCircle2, ArrowRight } from 'lucide-react';
 
 function LoginForm() {
   const router = useRouter();
@@ -13,12 +13,9 @@ function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-  const [attemptsRemaining, setAttemptsRemaining] = useState<number | null>(null);
-  const [isLocked, setIsLocked] = useState(false);
-  const [remainingSeconds, setRemainingSeconds] = useState(0);
   const [isSuccess, setIsSuccess] = useState(false);
 
-  // Poll / fetch status on load
+  // Check if already authenticated on load
   useEffect(() => {
     async function checkStatus() {
       try {
@@ -27,51 +24,18 @@ function LoginForm() {
           const data = await res.json();
           if (data.isAuthenticated) {
             router.push(nextUrl);
-            return;
-          }
-          if (data.isLocked) {
-            setIsLocked(true);
-            setRemainingSeconds(data.remainingSeconds);
-          } else {
-            setAttemptsRemaining(data.attemptsRemaining);
           }
         }
       } catch (e) {
-        // Ignore network failure on check
+        // Ignore check errors
       }
     }
     checkStatus();
   }, [nextUrl, router]);
 
-  // Lockout countdown timer
-  useEffect(() => {
-    if (!isLocked || remainingSeconds <= 0) return;
-
-    const timer = setInterval(() => {
-      setRemainingSeconds((prev) => {
-        if (prev <= 1) {
-          setIsLocked(false);
-          setAttemptsRemaining(3);
-          setErrorMsg('');
-          clearInterval(timer);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [isLocked, remainingSeconds]);
-
-  const formatCountdown = (totalSec: number) => {
-    const mins = Math.floor(totalSec / 60);
-    const secs = totalSec % 60;
-    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isLocked || isLoading || !password) return;
+    if (isLoading || !password) return;
 
     setIsLoading(true);
     setErrorMsg('');
@@ -90,16 +54,9 @@ function LoginForm() {
         setTimeout(() => {
           router.push(nextUrl);
           router.refresh();
-        }, 600);
+        }, 500);
       } else {
-        if (data.isLocked) {
-          setIsLocked(true);
-          setRemainingSeconds(data.remainingSeconds || 1800);
-          setErrorMsg(data.error || 'Account locked for 30 minutes.');
-        } else {
-          setAttemptsRemaining(data.attemptsRemaining ?? 2);
-          setErrorMsg(data.error || 'Incorrect password.');
-        }
+        setErrorMsg(data.error || 'Incorrect password. Please try again.');
       }
     } catch (err: any) {
       setErrorMsg(err?.message || 'Connection failed.');
@@ -136,16 +93,12 @@ function LoginForm() {
           {/* Padlock Icon & Title */}
           <div className="flex flex-col items-center text-center">
             <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg border transition-all ${
-              isLocked 
-                ? 'bg-red-950/80 border-red-500/50 text-red-400' 
-                : isSuccess
+              isSuccess
                 ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-400'
                 : 'bg-gradient-to-br from-red-600 to-amber-600 border-red-400/40 text-white'
             }`}>
               {isSuccess ? (
                 <CheckCircle2 className="w-7 h-7" />
-              ) : isLocked ? (
-                <ShieldAlert className="w-7 h-7 animate-pulse" />
               ) : (
                 <Lock className="w-7 h-7" />
               )}
@@ -155,25 +108,9 @@ function LoginForm() {
               Game Access Login
             </h1>
             <p className="text-xs text-slate-400 mt-1">
-              Enter the session password configured in your environment
+              Enter the session password to play
             </p>
           </div>
-
-          {/* Lockout Banner with Live Countdown Timer */}
-          {isLocked && (
-            <div className="mt-6 p-4 bg-red-950/60 border border-red-600/60 rounded-2xl text-center space-y-1">
-              <div className="flex items-center justify-center gap-1.5 text-xs font-mono font-black uppercase text-red-400 tracking-wider">
-                <ShieldAlert className="w-4 h-4" />
-                <span>30-Minute Security Lockout</span>
-              </div>
-              <p className="text-[11px] text-red-300">
-                3 incorrect tries detected. Please wait before attempting again:
-              </p>
-              <div className="text-3xl font-mono font-black tracking-widest text-red-400 pt-1">
-                {formatCountdown(remainingSeconds)}
-              </div>
-            </div>
-          )}
 
           {/* Form: Password Field ONLY */}
           <form onSubmit={handleSubmit} className="mt-6 space-y-4">
@@ -187,17 +124,16 @@ function LoginForm() {
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  disabled={isLocked || isLoading || isSuccess}
+                  disabled={isLoading || isSuccess}
                   placeholder="Enter game password..."
                   required
                   autoFocus
-                  className="w-full px-4 py-3.5 bg-slate-950/80 border border-slate-700 focus:border-red-500 focus:ring-2 focus:ring-red-500/30 rounded-xl text-white font-mono text-sm placeholder:text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed outline-hidden transition-all pr-12"
+                  className="w-full px-4 py-3.5 bg-slate-950/80 border border-slate-700 focus:border-red-500 focus:ring-2 focus:ring-red-500/30 rounded-xl text-white font-mono text-sm placeholder:text-slate-600 disabled:opacity-40 outline-hidden transition-all pr-12"
                 />
 
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  disabled={isLocked}
                   className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-white transition-colors"
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -205,24 +141,18 @@ function LoginForm() {
               </div>
             </div>
 
-            {/* Error Message & Attempts Remaining Badge */}
-            {errorMsg && !isLocked && (
+            {/* Error Message */}
+            {errorMsg && (
               <div className="p-3 bg-red-950/40 border border-red-500/40 rounded-xl text-xs text-red-300 flex items-center gap-2">
                 <ShieldAlert className="w-4 h-4 text-red-400 shrink-0" />
                 <span>{errorMsg}</span>
               </div>
             )}
 
-            {attemptsRemaining !== null && attemptsRemaining < 3 && !isLocked && (
-              <div className="text-[11px] font-mono text-amber-400 text-center">
-                ⚠️ {attemptsRemaining} attempt{attemptsRemaining === 1 ? '' : 's'} remaining before 30-min lockout
-              </div>
-            )}
-
             {/* Submit Button */}
             <button
               type="submit"
-              disabled={isLocked || isLoading || isSuccess || !password}
+              disabled={isLoading || isSuccess || !password}
               className="w-full py-3.5 bg-gradient-to-r from-red-600 via-red-500 to-amber-500 hover:from-red-500 hover:to-amber-400 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 active:scale-98"
             >
               {isLoading ? (
@@ -243,7 +173,7 @@ function LoginForm() {
 
           {/* Footer Security Tip */}
           <div className="mt-6 pt-4 border-t border-slate-800/80 text-center text-[10px] font-mono text-slate-500">
-            Protected with 3-strike brute-force lockout • 30-minute security cooldown
+            Enter the password to access the host board and player controllers
           </div>
         </div>
       </main>
